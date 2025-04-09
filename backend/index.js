@@ -1,60 +1,41 @@
-require("dotenv").config(); // security purpose
-const express = require("express");
-const mongoose = require("mongoose");
-const cors = require("cors");
-const multer = require("multer"); // for storage
-const pdfParse = require("pdf-parse"); // for parsing content
-const mammoth = require("mammoth"); // for parsing content
-const { analyzeResume } = require("./utils/aiAnalysis"); // calling analysis logic from other file
+const express = require('express');
+const multer = require('multer');
+const pdf = require('pdf-parse');
+const axios = require('axios');
+const fs = require('fs');
 
 const app = express();
-app.use(express.json()); // middleware
-app.use(cors()); // crossorigin 
 
-// using async to wait before performing next operations it will sync as per given condition
+// ⚠️ Don't use express.json() when using form-data via multer
+const upload = multer({ dest: 'uploads/' });
 
-mongoose
-  .connect(process.env.DBURI, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => console.log("MongoDB Connected"))
-  .catch((err) => console.error(err));
+app.post('/score', upload.single('resume'), async (req, res) => {
+    try {
+        const jobDescription = req.body.jobDescription;
+        const file = req.file;
 
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
+        if (!jobDescription || !file) {
+            return res.status(400).json({ error: "Both jobDescription and resume file are required." });
+        }
 
-const Resume = mongoose.model("Resume", {
-  name: String,
-  email: String,
-  text: String,
-  score: Number,
-  suggestions: [String],
-});
+        const buffer = fs.readFileSync(file.path);
+        const data = await pdf(buffer);
+        const resumeText = data.text;
 
-app.post("/upload", upload.single("resume"), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+        // Send to FastAPI
+        const response = await axios.post('http://localhost:8000/score', {
+            resume: resumeText,
+            job_description: jobDescription
+        });
 
-  try {
-    let text = "";
-    if (req.file.mimetype === "application/pdf") {
-      text = (await pdfParse(req.file.buffer)).text;
-    } else if (req.file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-      text = (await mammoth.extractRawText({ buffer: req.file.buffer })).value;
-    } else {
-      return res.status(400).json({ error: "Unsupported file format" });
+        fs.unlinkSync(file.path); // cleanup
+        res.json(response.data);
+    } catch (err) {
+        console.error("Error:", err.message);
+        res.status(500).json({ error: "Internal Server Error" });
     }
-
-    // Analyzing resume
-    const { score, suggestions } = await analyzeResume(text);
-
-    // Saving credentials
-    const newResume = new Resume({ name: req.body.name, email: req.body.email, text, score, suggestions });
-    await newResume.save();
-
-    res.json({ message: "Resume analyzed successfully", score, suggestions });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
 });
 
-
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(5000, () => {
+    console.log("✅ Node.js server running on port 5000");
+});
