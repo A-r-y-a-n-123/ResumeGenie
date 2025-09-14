@@ -1,13 +1,5 @@
 import { useState, useRef } from 'react';
 
-interface UploadedFile {
-  originalName: string;
-  filename: string;
-  size: number;
-  mimetype: string;
-  path: string;
-}
-
 interface FileInfo {
   id: number;
   filename: string;
@@ -138,7 +130,7 @@ const JobSeeker = () => {
     });
   };
 
-  const handleGetATSScore = async (fileId: number, filename: string) => {
+  const handleGetATSScore = async (fileId: number, _filename: string) => {
     try {
       const response = await fetch(`http://localhost:5000/api/ats-score/${fileId}`, {
         method: 'POST',
