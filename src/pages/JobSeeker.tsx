@@ -15,6 +15,8 @@ const JobSeeker = () => {
     message: string;
   }>({ type: null, message: '' });
   const [uploadedFiles, setUploadedFiles] = useState<FileInfo[]>([]);
+  const [leaderboard, setLeaderboard] = useState<Array<{ id: number; filename: string; score: number }>>([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -160,6 +162,59 @@ const JobSeeker = () => {
     }
   };
 
+  const computeLeaderboard = async () => {
+    if (!uploadedFiles.length) return;
+    setLeaderboardLoading(true);
+    try {
+      const results: Array<{ id: number; filename: string; score: number }> = [];
+      // Compute scores sequentially to keep it simple/lightweight
+      for (const f of uploadedFiles) {
+        // If your FileInfo didn’t include id yet, ensure it has: { id: number, filename, size, uploadDate }
+        const resp = await fetch(`http://localhost:5000/api/ats-score/${(f as any).id}`, { method: 'POST' });
+        const data = await resp.json();
+        if (data?.success) {
+          results.push({ id: (f as any).id, filename: f.filename, score: data.score });
+        }
+      }
+      results.sort((a, b) => b.score - a.score);
+      setLeaderboard(results);
+    } catch {
+      setUploadStatus({ type: 'error', message: 'Failed to compute leaderboard' });
+    } finally {
+      setLeaderboardLoading(false);
+    }
+  };
+
+  const validateAndSetFile = (file: File) => {
+    const allowed = [
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/msword'
+    ];
+    if (!allowed.includes(file.type)) {
+      setUploadStatus({ type: 'error', message: 'Please select a PDF or DOCX file only.' });
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadStatus({ type: 'error', message: 'File size must be less than 10MB.' });
+      return;
+    }
+    setSelectedFile(file);
+    setUploadStatus({ type: null, message: '' });
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const file = e.dataTransfer.files?.[0];
+    if (file) validateAndSetFile(file);
+  };
+
   // Load uploaded files on component mount
   useState(() => {
     fetchUploadedFiles();
@@ -174,7 +229,11 @@ const JobSeeker = () => {
         <div className="mb-8">
           <h2 className="text-xl font-semibold text-gray-800 mb-4">Upload Your Resume</h2>
           
-          <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
+          <div
+            className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors"
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+          >
             <div className="mb-4">
               <svg className="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
                 <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -302,6 +361,53 @@ const JobSeeker = () => {
                     >
                       Get ATS Score
                     </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Uploaded Resume Leaderboard Section */}
+        <div className="mt-10">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-gray-800">Your Resumes Leaderboard</h2>
+            <button
+              onClick={computeLeaderboard}
+              disabled={leaderboardLoading || uploadedFiles.length === 0}
+              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+            >
+              {leaderboardLoading ? 'Computing...' : 'Compute Leaderboard'}
+            </button>
+          </div>
+
+          {leaderboardLoading ? (
+            <div className="text-center py-8 text-gray-500">
+              <p>Computing leaderboard...</p>
+            </div>
+          ) : leaderboard.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <p>No resumes uploaded to compute a leaderboard.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {leaderboard.map((item, index) => (
+                <div key={item.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
+                  <div className="flex items-center">
+                    <div className="flex-shrink-0">
+                      <svg className="h-8 w-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                    </div>
+                    <div className="ml-4">
+                      <p className="text-sm font-medium text-gray-900">{item.filename}</p>
+                      <p className="text-sm text-gray-500">
+                        ATS Score: {item.score}/100
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm text-gray-700">Rank: {index + 1}</span>
                   </div>
                 </div>
               ))}
